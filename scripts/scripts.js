@@ -11,6 +11,13 @@ import {
   loadCSS,
   buildBlock,
 } from './aem.js';
+import { captureAuthCallback } from './off-record-auth.js';
+
+captureAuthCallback();
+
+function isOffRecordApp(doc = document) {
+  return !!doc.querySelector('main a[href*="/widgets/off-record/off-record.html"], main .off-record');
+}
 
 if (window.trustedTypes && window.trustedTypes.createPolicy) {
   const innerTT = window.trustedTypes.createPolicy('tt-inner', {
@@ -160,7 +167,8 @@ export function decorateMain(main) {
  * @param {Element} doc The container element
  */
 async function loadEager(doc) {
-  document.documentElement.lang = 'en';
+  document.documentElement.lang = 'ko';
+  if (isOffRecordApp(doc)) document.body.classList.add('off-record-page');
   decorateTemplateAndTheme();
   const main = doc.querySelector('main');
   if (main) {
@@ -184,7 +192,7 @@ async function loadEager(doc) {
  * @param {Element} doc The container element
  */
 async function loadLazy(doc) {
-  loadHeader(doc.querySelector('body > header'));
+  if (!isOffRecordApp(doc)) loadHeader(doc.querySelector('body > header'));
 
   const main = doc.querySelector('main');
   await loadSections(main);
@@ -193,7 +201,7 @@ async function loadLazy(doc) {
   const element = hash ? doc.getElementById(hash.substring(1)) : false;
   if (hash && element) element.scrollIntoView();
 
-  loadFooter(doc.querySelector('body > footer'));
+  if (!isOffRecordApp(doc)) loadFooter(doc.querySelector('body > footer'));
 
   loadCSS(`${window.hlx.codeBasePath}/styles/lazy-styles.css`);
   loadFonts();

@@ -1,0 +1,110 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { apiOrigin } from '../scripts/off-record-config.js';
+import {
+  can, routeFor, validateProduct, productState, shortDescription,
+  basicOutcomes, gamePreview, validateGame, canonical, requestSize,
+} from '../scripts/off-record-core.js';
+import { levelForXp } from '../scripts/off-record-dashboard.js';
+
+test('configuration is disabled by default and rejects unsafe API origins', () => {
+  assert.equal(apiOrigin(), '');
+  assert.equal(apiOrigin('https://api.example.test'), 'https://api.example.test');
+  for (const value of ['http://api.example.test', 'https://user:pass@api.example.test', 'https://api.example.test/a', 'https://api.example.test/?a=1', 'https://api.example.test/#x']) {
+    assert.throws(() => apiOrigin(value));
+  }
+  assert.throws(() => apiOrigin('http://localhost:8080'));
+  assert.equal(apiOrigin('http://localhost:8080', true), 'http://localhost:8080');
+});
+
+test('routes and permissions are deny-by-default, with non-delegable owner access', () => {
+  const member = { permissions: ['attendance.manage', 'access.manage'] };
+  assert.equal(can(member, 'attendance.manage'), true);
+  assert.equal(can(member, 'access.manage'), false);
+  assert.equal(can(member, 'xp.adjust'), false);
+  assert.equal(can(null), false);
+  assert.equal(can({ owner: true }, 'access.manage'), true);
+  assert.equal(routeFor('#/admin/attendance')[1], 'attendance');
+  assert.equal(routeFor('')[0], 'shop');
+  assert.equal(routeFor('#/unknown'), undefined);
+  assert.equal(routeFor('#/admin/attendance?fake=1'), undefined);
+});
+
+test('shop distinguishes completed, externally owned and pending products', () => {
+  const item = { enabled: true, priceXp: 100 };
+  assert.equal(productState({ ...item, purchased: true, owned: true }, 1000), 'purchased');
+  assert.equal(productState({ ...item, purchased: true }, 1000), 'checkRole');
+  assert.equal(productState({ ...item, owned: true }, 1000), 'owned');
+  assert.equal(productState({ ...item, pending: true }, 1000), 'pending');
+  assert.equal(productState(item, 99), 'insufficient');
+  assert.equal(productState(item, 100), 'buy');
+  assert.equal(productState({ ...item, enabled: false }, 100), 'disabled');
+});
+
+test('product validation protects immutable roles, Unicode bounds and safe prices', () => {
+  const roles = [
+    { id: 'a', manageable: true }, { id: 'b', dangerous: true },
+    { id: 'c', managed: true }, { id: 'd', manageable: false },
+  ];
+  const item = { title: '역할', description: '<img src=x onerror=alert(1)>', roleId: 'a', priceXp: 100, sortOrder: 0, enabled: true };
+  assert.equal(validateProduct(item, null, roles), true);
+  assert.equal(validateProduct({ ...item, id: '1', version: 1 }, item, roles), false);
+  assert.equal(validateProduct({ ...item, enabled: false, roleId: undefined }, null, roles), false);
+  assert.equal(validateProduct({ ...item, title: '가'.repeat(101) }, null, roles), false);
+  assert.equal(validateProduct({ ...item, description: '가'.repeat(4097) }, null, roles), false);
+  assert.equal(validateProduct({ ...item, priceXp: -1 }, null, roles), false);
+  assert.equal(validateProduct({ ...item, priceXp: 0 }, null, roles), false);
+  assert.equal(validateProduct({ ...item, sortOrder: -1000000 }, null, roles), true);
+  ['b', 'c', 'd'].forEach((roleId) => assert.equal(validateProduct({ ...item, roleId }, null, roles), false));
+  assert.equal(validateProduct({ ...item, roleId: 'b' }, { ...item, roleLocked: true }, roles), false);
+  assert.equal(validateProduct(item, { ...item, roleLocked: true }, []), false);
+  assert.equal(validateProduct({ ...item, enabled: false }, { ...item, roleLocked: true }, []), true);
+  assert.equal(validateProduct({ ...item, roleId: 'b', enabled: false }, { ...item, roleId: 'b' }, roles), true);
+  assert.equal(validateProduct({ ...item, roleId: 'b', enabled: false }, null, roles), false);
+  assert.equal(shortDescription('😀'.repeat(101)).length, 100);
+  assert.equal(shortDescription(`a${'😀'.repeat(100)}`).isWellFormed(), true);
+  assert.equal(shortDescription(' 긴\n 설명 '), '긴 설명');
+});
+
+test('all basic games have exact 94% RTP including selectable outcomes and milli-XP payouts', () => {
+  ['slots', 'wheel', 'oddEven', 'dice'].forEach((kind) => {
+    const game = {
+      mode: 'basic', targetRtp: 94, minBetXp: 1, maxBetXp: 1000,
+      maxPayoutXp: 10000, cooldownSeconds: 10,
+      outcomes: basicOutcomes({}, 94, kind),
+    };
+    const preview = validateGame(game, kind);
+    assert.ok(Math.abs(preview.theoretical - 94) < 1e-8, kind);
+    const atOne = gamePreview(game, 1, kind);
+    assert.ok(Math.abs(atOne.actual - 94) < 1e-8, kind);
+    assert.equal(atOne.exact, true);
+    if (kind === 'oddEven') assert.deepEqual(atOne.rows.map(({ payout }) => payout), [1.88, 0]);
+    if (kind === 'dice') assert.ok(Math.abs(gamePreview(game, 1, kind, '6').actual - 94) < 1e-8);
+    assert.throws(() => validateGame({ ...game, maxPayoutXp: 1 }, kind), /invalidGame/);
+  });
+  assert.throws(() => basicOutcomes({}, 94.0001, 'slots'), /gamePrecision/);
+  const game = {
+    mode: 'advanced', minBetXp: 1, maxBetXp: 10, cooldownSeconds: 10, maxPayoutXp: 100,
+    outcomes: [{ id: 'odd', weight: 3, multiplierMilli: 1880 }, { id: 'even', weight: 1, multiplierMilli: 1880 }],
+  };
+  assert.throws(() => validateGame(game, 'oddEven'), /invalidGame/);
+});
+
+test('advanced probabilities are calculated per choice and payout caps are not clipping', () => {
+  const game = { outcomes: [{ id: 'odd', weight: 3, multiplierMilli: 1880 }, { id: 'even', weight: 1, multiplierMilli: 1880 }] };
+  assert.equal(gamePreview(game, 10, 'oddEven', 'odd').actual, 141);
+  assert.equal(gamePreview(game, 10, 'oddEven', 'even').actual, 47);
+  assert.equal(gamePreview(game, 10, 'oddEven', 'odd').maximum, 18.8);
+  assert.throws(() => gamePreview({ outcomes: [{ id: 'a', weight: -1, multiplierMilli: 1 }] }), /invalidGame/);
+});
+
+test('request comparison is deterministic and size limit measures UTF-8 bytes', () => {
+  assert.equal(canonical({ b: 2, a: 1 }), canonical({ a: 1, b: 2 }));
+  assert.equal(requestSize({ a: '가' }), 11);
+});
+
+test('client level preview matches shared server formula at boundaries', () => {
+  [0, 1, 100, 1000, 12345, 10000000].forEach((xp) => {
+    assert.equal(levelForXp(xp), Math.floor(Math.sqrt((3 * Math.floor(xp) + 4) / 100)));
+  });
+});
