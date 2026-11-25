@@ -7,8 +7,9 @@ import {
 } from '../scripts/off-record-core.js';
 import { levelForXp } from '../scripts/off-record-dashboard.js';
 
-test('configuration is disabled by default and rejects unsafe API origins', () => {
-  assert.equal(apiOrigin(), '');
+test('configuration uses the production gateway, supports explicit disabling and rejects unsafe origins', () => {
+  assert.equal(apiOrigin(), 'https://off-record-xp-api.cbycdy2.workers.dev');
+  assert.equal(apiOrigin(''), '');
   assert.equal(apiOrigin('https://api.example.test'), 'https://api.example.test');
   for (const value of ['http://api.example.test', 'https://user:pass@api.example.test', 'https://api.example.test/a', 'https://api.example.test/?a=1', 'https://api.example.test/#x']) {
     assert.throws(() => apiOrigin(value));

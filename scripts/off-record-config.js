@@ -1,5 +1,5 @@
 // Public deployment configuration only. Never put credentials in this file.
-export const API_ORIGIN = '';
+export const API_ORIGIN = 'https://off-record-xp-api.cbycdy2.workers.dev';
 export const APP_PATH = '/dashboard';
 export const ALLOW_LOCALHOST_API = false;
 

@@ -9,14 +9,16 @@
 `scripts/off-record-config.js`:
 
 ```js
-export const API_ORIGIN = '';
+export const API_ORIGIN = 'https://off-record-xp-api.cbycdy2.workers.dev';
 export const APP_PATH = '/dashboard';
 export const ALLOW_LOCALHOST_API = false;
 ```
 
 - `API_ORIGIN`은 **실제로 확보한 고정 HTTPS API Origin**으로 변경합니다.
   경로, 쿼리, 해시, 사용자명, 비밀번호는 허용하지 않습니다.
-  기본값은 의도적으로 비어 있습니다. 이 상태에서는 한국어 연결 설정 안내만
+  현재 주소는 전용 `workers.dev` Worker이며, Workers VPC와 비공개 Tunnel을
+  통해 Oracle API로 연결합니다. 별도 도메인 구매나 Oracle API 포트 공개는 필요 없습니다.
+  값을 비워 두면 한국어 연결 설정 안내만
   표시하며 사이트 상대 `/api` 요청, 가짜 데이터, 성공 응답을 만들지 않습니다.
 - `APP_PATH`는 로그인 복귀가 허용된 정확한 앱 경로입니다. 기본 진입점은
   `/dashboard`입니다. 다른 경로를 쓰려면 API 복귀 주소 허용 목록도 함께 바꿉니다.
@@ -28,7 +30,9 @@ export const ALLOW_LOCALHOST_API = false;
 
 API/Discord/Cloudflare 운영 준비:
 
-1. 고정 API HTTPS 호스트 → Cloudflare Tunnel → Oracle 루프백 API를 연결합니다.
+1. 전용 `workers.dev` HTTPS 호스트 → Workers VPC → Cloudflare Tunnel →
+   Oracle 루프백 API를 연결합니다. Workers VPC는 현재 베타 기간 무료이며,
+   Workers 무료 플랜의 계정 전체 일일 10만 요청 한도가 적용됩니다.
 2. Discord 애플리케이션의 OAuth 콜백을 실제 API 콜백 주소로 등록합니다.
 3. API의 공식 사이트 Origin을
    `https://main--off-record-bot-site--shawn2dev.aem.live`로 정확히 제한합니다.
@@ -40,8 +44,9 @@ API/Discord/Cloudflare 운영 준비:
 6. 별도 개발 API와 정확한 로컬/미리보기 Origin·복귀 주소 허용 목록을 준비한 후
    실제 로그인·멤버/권한 변경·만료·로그아웃을 검증합니다.
 
-고정 호스트와 운영 자격 증명이 아직 없으므로 **실제 OAuth 로그인이나 운영 배포를
-완료한 상태가 아닙니다.** 로컬 테스트 fixture는 실제 로그인이나 결제 증거가 아닙니다.
+공개 API 주소 설정만으로 **실제 OAuth 로그인이나 운영 연결이 완료되는 것은
+아닙니다.** Discord Redirect 등록, Oracle API와 Tunnel 실행, 아래 콘텐츠 발행 후
+실제 로그인으로 검증해야 합니다. 로컬 테스트 fixture는 실제 로그인이나 결제 증거가 아닙니다.
 
 ## da.live에서 한 번만 작성·발행
 
