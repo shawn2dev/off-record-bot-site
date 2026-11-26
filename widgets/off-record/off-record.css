@@ -427,10 +427,118 @@ body.off-record-page main > .section > div {
   margin-bottom: 22px;
 }
 
-.off-record .or-field label {
+.off-record .or-field label,
+.off-record .or-field-label {
   color: #44495f;
   font-size: 13px;
   font-weight: 650;
+}
+
+.off-record summary {
+  padding: 10px 0;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.off-record .or-settings-row {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+  gap: 16px;
+  padding: 16px 0;
+}
+
+.off-record .or-settings-list > .or-settings-row {
+  margin: 0;
+  border-bottom: 1px solid var(--or-border);
+}
+
+.off-record .or-settings-list > .or-settings-row:last-child {
+  border-bottom: none;
+}
+
+.off-record .or-role-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.off-record .or-role-picker > summary {
+  position: relative;
+  min-height: 44px;
+  overflow: hidden;
+  padding: 10px 34px 10px 12px;
+  border: 1px solid #ced1df;
+  border-radius: 9px;
+  background: white;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.off-record .or-role-picker > summary::-webkit-details-marker {
+  display: none;
+}
+
+.off-record .or-role-picker > summary::after {
+  position: absolute;
+  top: 17px;
+  right: 14px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--or-muted);
+  border-bottom: 2px solid var(--or-muted);
+  transform: rotate(45deg);
+  content: "";
+}
+
+.off-record .or-role-picker[open] > summary::after {
+  top: 21px;
+  transform: rotate(225deg);
+}
+
+.off-record .or-role-dropdown {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  padding: 12px;
+  border: 1px solid var(--or-border);
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 8px 24px rgb(22 29 62 / 12%);
+}
+
+.off-record .or-role-options {
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 10px 0;
+  overscroll-behavior: contain;
+}
+
+.off-record .or-role-options .or-role-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.off-record .or-role-option:hover {
+  background: #f5f4fe;
+}
+
+.off-record .or-role-option:has(input:disabled) {
+  color: var(--or-muted);
+  cursor: not-allowed;
 }
 
 .off-record input,
@@ -451,6 +559,16 @@ body.off-record-page main > .section > div {
 .off-record select:disabled {
   background: #f3f4f8;
   color: #686e83;
+}
+
+.off-record .or-role-option input {
+  flex: 0 0 20px;
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--or-accent);
 }
 
 .off-record select[multiple] {
@@ -640,13 +758,6 @@ body.off-record-page main > .section > div {
   overflow-wrap: anywhere;
 }
 
-.off-record summary {
-  padding: 10px 0;
-  font-size: 14px;
-  font-weight: 650;
-  cursor: pointer;
-}
-
 .off-record progress {
   width: 100%;
   accent-color: var(--or-accent);
@@ -681,6 +792,11 @@ body.off-record-page main > .section > div {
 }
 
 @media (width <= 760px) {
+  .off-record .or-settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
   .off-record .off-record-root {
     display: block;
   }

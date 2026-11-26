@@ -17,6 +17,20 @@ export function can(me, permission) {
   return [].concat(permission).some((id) => me.permissions?.includes(id));
 }
 
+export function adminRolesFromPermissions(original, assignments) {
+  const roles = new Set([...Object.keys(original), ...Object.values(assignments).flat()]);
+  return Object.fromEntries([...roles].map((roleId) => {
+    const granted = Object.entries(assignments)
+      .filter(([permission, ids]) => permission !== 'access.manage' && ids.includes(roleId))
+      .map(([permission]) => permission);
+    const previous = original[roleId] || [];
+    return [roleId, [
+      ...previous.filter((permission) => granted.includes(permission)),
+      ...granted.filter((permission) => !previous.includes(permission)),
+    ]];
+  }).filter(([, permissions]) => permissions.length));
+}
+
 export function routeFor(hash) {
   const path = hash.replace(/^#\/?/, '').replace(/\/$/, '') || 'shop';
   return ROUTES.find(([id]) => id === path);

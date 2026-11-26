@@ -4,6 +4,7 @@ import { OffRecordClient } from './off-record-auth.js';
 import {
   ROUTES, can, routeFor, integer, safeRole, validateProduct, productState,
   shortDescription, canonical, gamePreview, basicOutcomes, validateGame,
+  adminRolesFromPermissions,
 } from './off-record-core.js';
 import { t, number, date } from './off-record-locale.js';
 
@@ -99,7 +100,10 @@ function roleField(key, value, roles, {
   multiple = false, locked = false, all = false, restricted = false,
 } = {}) {
   const items = roles.map((role) => ({
-    id: role.id, label: role.name, disabled: restricted && !safeRole(role),
+    id: role.id,
+    label: role.name,
+    disabled: (restricted && !safeRole(role))
+      || (role.missing && !(value || []).includes(role.id)),
   }));
   if (multiple) {
     (value || []).filter((id) => !items.some((item) => item.id === id)).forEach((id) => {
@@ -110,9 +114,93 @@ function roleField(key, value, roles, {
   if (value && !multiple && !items.some(({ id }) => id === value)) {
     items.push({ id: value, label: value, disabled: true });
   }
-  return field(key, value, {
+  const control = field(key, value, {
     type: 'select', multiple, items, disabled: locked,
   });
+  if (!multiple) return control;
+  const label = element('span', {
+    id: `${control.input.id}-label`, class: 'or-field-label', text: t(key),
+  });
+  const summary = element('summary', {
+    id: `${control.input.id}-summary`,
+    'aria-labelledby': `${label.id} ${control.input.id}-summary`,
+    'aria-disabled': locked ? 'true' : undefined,
+    onclick: (event) => { if (locked) event.preventDefault(); },
+  });
+  const search = element('input', {
+    type: 'search', placeholder: t('roleSearch'), 'aria-label': t('roleSearch'),
+  });
+  const empty = p('noRoleMatches', 'or-muted');
+  const options = [...control.input.options].map((option) => {
+    const checkbox = element('input', {
+      type: 'checkbox',
+      value: option.value,
+      disabled: locked || option.disabled,
+      oninput: (event) => {
+        event.stopPropagation();
+        option.selected = checkbox.checked;
+        control.input.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+    });
+    const node = element('label', { class: 'or-role-option' }, [
+      checkbox, element('span', { text: option.textContent }),
+    ]);
+    return { option, checkbox, node };
+  });
+  const update = () => {
+    options.forEach(({ option, checkbox }) => { checkbox.checked = option.selected; });
+    const selected = [...control.input.selectedOptions].map((option) => option.textContent);
+    summary.textContent = selected.length
+      ? `${selected[0]}${selected.length > 1 ? ` · ${number(selected.length)}${t('roleCount')}` : ''}`
+      : t(all ? 'allMembers' : 'noRoleSelection');
+    summary.title = selected.join(', ');
+  };
+  const filter = (event) => {
+    event.stopPropagation();
+    const term = search.value.trim().toLocaleLowerCase('ko-KR');
+    options.forEach(({ node, option }) => {
+      node.hidden = !`${option.textContent} ${option.value}`.toLocaleLowerCase('ko-KR').includes(term);
+    });
+    empty.hidden = options.some(({ node }) => !node.hidden);
+  };
+  search.addEventListener('input', filter);
+  search.addEventListener('change', (event) => event.stopPropagation());
+  const picker = element('details', { class: 'or-role-picker' }, [
+    summary,
+    element('div', { class: 'or-role-dropdown' }, [
+      search,
+      element('div', { class: 'or-role-options' }, [...options.map(({ node }) => node), empty]),
+      button('clearSelection', () => {
+        [...control.input.options].forEach((option) => { option.selected = false; });
+        control.input.dispatchEvent(new Event('input', { bubbles: true }));
+      }, 'or-secondary', { disabled: locked }),
+    ]),
+  ]);
+  picker.addEventListener('toggle', () => {
+    if (!picker.open) return;
+    picker.getRootNode().querySelectorAll('.or-role-picker[open]').forEach((other) => {
+      if (other !== picker) other.open = false;
+    });
+  });
+  picker.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      picker.open = false;
+      summary.focus();
+    }
+  });
+  picker.addEventListener('focusout', (event) => {
+    if (!picker.contains(event.relatedTarget)) picker.open = false;
+  });
+  control.input.hidden = true;
+  control.input.addEventListener('input', update);
+  control.input.addEventListener('change', update);
+  control.node.classList.add('or-settings-row');
+  control.node.replaceChildren(label, control.input, picker);
+  filter(new Event('input'));
+  update();
+  return control;
 }
 
 function pairs(values) {
@@ -152,7 +240,7 @@ function resultView(result) {
 }
 
 function formValues(container) {
-  return [...container.querySelectorAll('input, textarea, select')].map((input) => {
+  return [...container.querySelectorAll('input[name], textarea[name], select[name]')].map((input) => {
     if (input.type === 'checkbox') return input.checked;
     if (input.multiple) return [...input.selectedOptions].map(({ value }) => value);
     return input.value;
@@ -160,12 +248,13 @@ function formValues(container) {
 }
 
 function restoreValues(container, values = []) {
-  [...container.querySelectorAll('input, textarea, select')].forEach((input, index) => {
+  [...container.querySelectorAll('input[name], textarea[name], select[name]')].forEach((input, index) => {
     const value = values[index];
     if (value === undefined) return;
     if (input.type === 'checkbox') input.checked = value;
     else if (input.multiple) {
       [...input.options].forEach((option) => { option.selected = value.includes(option.value); });
+      input.dispatchEvent(new Event('input'));
     } else input.value = value;
   });
 }
@@ -291,9 +380,9 @@ export class Dashboard {
   navigation() {
     this.nav.replaceChildren();
     const groups = [
-      ['member', ROUTES.filter(([, , permission]) => !permission)],
-      ['management', ROUTES.filter(([, , permission]) => permission && permission !== 'access.manage')],
       ['ownerGroup', ROUTES.filter(([, , permission]) => permission === 'access.manage')],
+      ['management', ROUTES.filter(([, , permission]) => permission && permission !== 'access.manage')],
+      ['member', ROUTES.filter(([, , permission]) => !permission)],
     ];
     groups.forEach(([label, routes]) => {
       const visible = routes.filter(([, , permission]) => can(this.me, permission));
@@ -892,7 +981,7 @@ export class Dashboard {
         let key = section === 'games' ? 'invalidGame' : 'invalid';
         if (['invalid', 'invalidProduct', 'invalidGame', 'gamePrecision', 'missingRoleHelp']
           .includes(error.message)) key = error.message;
-        validation.textContent = t(key);
+        validation.textContent = `${error.gameKind ? `${t(error.gameKind)}: ` : ''}${t(key)}`;
         validation.classList.add('or-error');
       }
       const changed = canonical(current) !== canonical(initial) || (!valid && hasEdits);
@@ -901,7 +990,9 @@ export class Dashboard {
       save.disabled = !changed || !valid || this.busy;
       if (persist) {
         try {
-          this.client.draft(id, { version, value: current, rawValues: formValues(body) });
+          this.client.draft(id, {
+            version, value: current, rawValues: formValues(body), layout: editor.draftLayout,
+          });
         } catch (error) {
           save.disabled = true;
           this.error(error);
@@ -912,7 +1003,9 @@ export class Dashboard {
       editor = build(clone(current));
       body.replaceChildren(...editor.nodes);
       if (!restored && saved?.rawValues) {
-        restoreValues(body, saved.rawValues);
+        if (!editor.draftLayout || saved.layout === editor.draftLayout) {
+          restoreValues(body, saved.rawValues);
+        }
         editor.update?.();
         restored = true;
       }
@@ -1070,62 +1163,58 @@ export class Dashboard {
   accessFields(value, roles) {
     const catalog = this.me.permissionCatalog || [];
     const ids = catalog.map((item) => (typeof item === 'string' ? item : item.id));
-    const search = field('roleSearch', '');
-    const list = element('div', { class: 'or-role-list' });
+    const list = element('div', { class: 'or-settings-list' });
     const controls = [];
     const editableRoles = [...roles];
     Object.keys(value.adminRoles || {}).filter((id) => !roles.some((role) => role.id === id))
       .forEach((id) => editableRoles.push({ id, name: `${t('missingRole')} · ${id}`, missing: true }));
-    editableRoles.forEach((role) => {
-      const group = element('fieldset', { class: 'or-role-permissions' }, [
-        element('legend', { text: role.name }),
-        role.dangerous || role.managed || role.manageable === false ? p('accessTrust') : null,
-        role.missing ? p('missingRoleHelp') : null,
-      ]);
-      ids.forEach((id) => {
-        const checked = (value.adminRoles?.[role.id] || []).includes(id);
-        const control = field(permissionLabel(id), checked, {
-          type: 'checkbox', disabled: (role.missing && !checked) || id === 'access.manage',
-        });
-        if (id === 'access.manage') control.node.append(badge('ownerOnly'));
-        group.append(control.node);
-        controls.push({ roleId: role.id, permission: id, control });
-      });
-      group.dataset.name = role.name.toLocaleLowerCase('ko-KR');
-      if (role.missing) {
-        group.append(button('removeRole', async () => {
-          if (!(await confirmAction('removeRole', p('missingRoleHelp')))) return;
-          controls.filter(({ roleId }) => roleId === role.id)
-            .forEach(({ control }) => { control.input.checked = false; });
-          search.input.dispatchEvent(new Event('input', { bubbles: true }));
-        }, 'or-secondary'));
+    ids.forEach((id) => {
+      if (id === 'access.manage') {
+        list.append(element('div', { class: 'or-settings-row' }, [
+          element('span', { class: 'or-field-label', text: t(permissionLabel(id)) }),
+          badge('ownerOnly'),
+        ]));
+        return;
       }
-      list.append(group);
+      const selected = Object.entries(value.adminRoles || {})
+        .filter(([, permissions]) => permissions.includes(id)).map(([roleId]) => roleId);
+      const control = roleField(permissionLabel(id), selected, editableRoles, { multiple: true });
+      control.node.dataset.permission = id;
+      controls.push({ permission: id, control });
+      list.append(control.node);
     });
-    search.input.addEventListener('input', () => {
-      const term = search.read().toLocaleLowerCase('ko-KR');
-      [...list.children].forEach((group) => { group.hidden = !group.dataset.name.includes(term); });
-    });
+    const missing = editableRoles.filter((role) => role.missing);
+    const cleanup = missing.length ? element('div', { class: 'or-missing-roles' }, [
+      p('missingRoleHelp'),
+      ...missing.map((role) => element('div', { class: 'or-settings-row' }, [
+        element('span', { class: 'or-field-label', text: role.name }),
+        button('removeRole', async () => {
+          if (!(await confirmAction('removeRole', p('missingRoleHelp')))) return;
+          controls.forEach(({ control }) => {
+            [...control.input.options].filter((option) => option.value === role.id)
+              .forEach((option) => { option.selected = false; });
+            control.input.dispatchEvent(new Event('input'));
+          });
+          controls[0]?.control.input.dispatchEvent(new Event('input', { bubbles: true }));
+        }, 'or-secondary'),
+      ])),
+    ]) : null;
     return {
-      nodes: [p('accessHelp'), p('accessTrust'), search.node, list],
-      read: () => {
-        const adminRoles = clone(value.adminRoles || {});
-        editableRoles.forEach(({ id }) => { delete adminRoles[id]; });
-        controls.forEach(({ roleId, permission, control }) => {
-          if (control.read() && permission !== 'access.manage') {
-            adminRoles[roleId] ||= [];
-            adminRoles[roleId].push(permission);
-          }
-        });
-        Object.entries(adminRoles).forEach(([roleId, permissions]) => {
-          const original = value.adminRoles?.[roleId] || [];
-          adminRoles[roleId] = [
-            ...original.filter((id) => permissions.includes(id)),
-            ...permissions.filter((id) => !original.includes(id)),
-          ];
-        });
-        return { ...value, adminRoles };
-      },
+      draftLayout: 'permission-roles-v1',
+      nodes: [
+        p('accessHelp'), p('accessTrust'),
+        cleanup,
+        list,
+      ].filter(Boolean),
+      read: () => ({
+        ...value,
+        adminRoles: adminRolesFromPermissions(
+          value.adminRoles || {},
+          Object.fromEntries(controls.map(({ permission, control }) => (
+            [permission, control.read()]
+          ))),
+        ),
+      }),
       validate: (next) => {
         if (Object.entries(next.adminRoles).some(([id, permissions]) => (
           !roles.some((role) => role.id === id) && permissions.length
@@ -1146,7 +1235,9 @@ export class Dashboard {
       const maximum = numeric('maxBetXp', game.maxBetXp, 1, 1000000);
       const cooldown = numeric('cooldownSeconds', game.cooldownSeconds, 0, 86400);
       const cap = numeric('maxPayoutXp', game.maxPayoutXp, 1, 1000000000);
-      const allowedRoles = roleField('allowedRoleIds', game.allowedRoleIds, roles, { multiple: true });
+      const allowedRoles = roleField('allowedRoleIds', game.allowedRoleIds, roles, {
+        multiple: true, all: true,
+      });
       const channels = field('allowedChannelIds', (game.allowedChannelIds || []).join(', '));
       const outcomes = field('outcomes', JSON.stringify(game.outcomes, null, 2), { type: 'textarea', rows: 10 });
       const sample = numeric('betPreview', game.minBetXp, 1);
@@ -1236,16 +1327,46 @@ export class Dashboard {
         kind, node: group, read, update,
       };
     });
+    const picker = field('gameKind', editors[0].kind, {
+      type: 'select', items: editors.map(({ kind }) => ({ id: kind, label: t(kind) })),
+    });
+    picker.input.removeAttribute('name');
+    picker.node.classList.add('or-settings-row');
+    const show = (kind) => {
+      picker.input.value = kind;
+      editors.forEach((editor) => { editor.node.hidden = editor.kind !== kind; });
+    };
+    picker.input.addEventListener('input', (event) => event.stopPropagation());
+    picker.input.addEventListener('change', (event) => {
+      event.stopPropagation();
+      show(picker.read());
+    });
+    show(picker.read());
     return {
-      nodes: [p('gameHelp'), ...editors.map(({ node }) => node)],
+      nodes: [p('gameHelp'), p('gameSelectionHelp'), picker.node, ...editors.map(({ node }) => node)],
       update: () => editors.forEach((editor) => editor.update()),
-      read: () => Object.fromEntries(editors.map(({ kind, read }) => [kind, read()])),
+      read: () => Object.fromEntries(editors.map(({ kind, read }) => {
+        try {
+          return [kind, read()];
+        } catch (error) {
+          error.gameKind = kind;
+          throw error;
+        }
+      })),
       validate: (next) => Object.entries(next).forEach(([kind, game]) => {
-        validateGame(game, kind);
-        if (game.allowedChannelIds.length > 100 || game.allowedRoleIds.length > 100
-          || game.allowedChannelIds.some((id) => !/^\d{15,20}$/.test(id))
-          || new Set(game.allowedChannelIds).size !== game.allowedChannelIds.length) {
-          throw new Error('invalid');
+        try {
+          validateGame(game, kind);
+          const controls = editors.find((editor) => editor.kind === kind).node
+            .querySelectorAll('input[name], textarea[name], select[name]');
+          if (![...controls].every((input) => input.checkValidity())) throw new Error('invalidGame');
+          if (game.allowedChannelIds.length > 100 || game.allowedRoleIds.length > 100
+            || game.allowedChannelIds.some((id) => !/^\d{15,20}$/.test(id))
+            || new Set(game.allowedChannelIds).size !== game.allowedChannelIds.length) {
+            throw new Error('invalid');
+          }
+        } catch (error) {
+          error.gameKind = kind;
+          throw error;
         }
       }),
     };

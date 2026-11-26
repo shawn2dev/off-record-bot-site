@@ -4,6 +4,7 @@ import { apiOrigin } from '../scripts/off-record-config.js';
 import {
   can, routeFor, validateProduct, productState, shortDescription,
   basicOutcomes, gamePreview, validateGame, canonical, requestSize,
+  adminRolesFromPermissions,
 } from '../scripts/off-record-core.js';
 import { Dashboard, levelForXp } from '../scripts/off-record-dashboard.js';
 
@@ -74,6 +75,33 @@ test('routes and permissions are deny-by-default, with non-delegable owner acces
   assert.equal(routeFor('')[0], 'shop');
   assert.equal(routeFor('#/unknown'), undefined);
   assert.equal(routeFor('#/admin/attendance?fake=1'), undefined);
+});
+
+test('permission-first assignments preserve the role-based policy and permission order', () => {
+  const original = { first: ['xp.adjust', 'attendance.manage'], second: ['audit.view'] };
+  const assignments = {
+    'attendance.manage': ['first', 'third'],
+    'xp.adjust': ['first'],
+    'audit.view': ['second', 'third'],
+    'access.manage': ['first', 'third'],
+  };
+  assert.deepEqual(adminRolesFromPermissions(original, assignments), {
+    first: ['xp.adjust', 'attendance.manage'],
+    second: ['audit.view'],
+    third: ['attendance.manage', 'audit.view'],
+  });
+  assert.deepEqual(original, {
+    first: ['xp.adjust', 'attendance.manage'], second: ['audit.view'],
+  });
+});
+
+test('clearing assignments removes empty and missing roles without delegating owner access', () => {
+  assert.deepEqual(adminRolesFromPermissions({
+    missing: ['attendance.manage'], old: ['xp.adjust'],
+  }, { 'attendance.manage': [], 'xp.adjust': [], 'access.manage': ['owner-role'] }), {});
+  assert.deepEqual(adminRolesFromPermissions({}, { 'attendance.manage': ['one', 'two'] }), {
+    one: ['attendance.manage'], two: ['attendance.manage'],
+  });
 });
 
 test('shop distinguishes completed, externally owned and pending products', () => {
