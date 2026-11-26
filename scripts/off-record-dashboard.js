@@ -4,7 +4,7 @@ import { OffRecordClient } from './off-record-auth.js';
 import {
   ROUTES, can, routeFor, integer, safeRole, validateProduct, productState,
   shortDescription, canonical, gamePreview, basicOutcomes, validateGame,
-  adminRolesFromPermissions,
+  adminRolesFromPermissions, memberDisplayName, memberPresentation,
 } from './off-record-core.js';
 import { t, number, date } from './off-record-locale.js';
 
@@ -209,14 +209,14 @@ function pairs(values) {
   ]));
 }
 
-function details(value) {
-  return element('pre', { class: 'or-json', text: JSON.stringify(value, null, 2) });
+function details(value, names) {
+  return element('pre', { class: 'or-json', text: JSON.stringify(memberPresentation(value, names), null, 2) });
 }
 
 function resultView(result) {
   const values = [];
   if (result.game) values.push(['games', t(result.game)], ['result', outcomeLabel(result.outcome)]);
-  if (result.userId) values.push(['userId', result.userId]);
+  if (result.userId) values.push(['targetMember', memberDisplayName(result)]);
   if (result.amountXp !== undefined) values.push(['amount', `${number(result.amountXp)} ${t('xpUnit')}`]);
   if (result.feeXp !== undefined) values.push(['fee', `${number(result.feeXp)} ${t('xpUnit')}`]);
   if (result.receivedXp !== undefined) values.push(['recipientGets', `${number(result.receivedXp)} ${t('xpUnit')}`]);
@@ -230,7 +230,7 @@ function resultView(result) {
   const node = element('div', { class: 'or-result' }, [pairs(values)]);
   if (Array.isArray(result.winners)) {
     node.append(element('ol', {}, result.winners.map((winner) => element('li', {
-      text: `${winner.userId} · ${number(winner.amountXp)} ${t('xpUnit')}`,
+      text: `${memberDisplayName(winner)} · ${number(winner.amountXp)} ${t('xpUnit')}`,
     }))));
   }
   node.append(element('details', {}, [
@@ -297,6 +297,7 @@ export class Dashboard {
     this.dirtyForms = new Set();
     this.message = '';
     this.busy = false;
+    this.memberNames = {};
   }
 
   get dirty() {
@@ -453,9 +454,20 @@ export class Dashboard {
 
   async loadMember() {
     this.me = await this.client.request('/api/me');
-    this.client.bindActor(this.me.user.id);
+    if (this.client.bindActor(this.me.user.id)) this.memberNames = {};
+    this.memberNames ||= {};
+    this.memberNames[this.me.user.id] = this.me.user.displayName;
     this.client.confirmSession();
+    const ids = Object.values(this.client.state.requests)
+      .map((request) => request.body.userId).filter(Boolean);
+    if (ids.length) await this.loadMemberNames(ids);
     this.navigation();
+  }
+
+  async loadMemberNames(ids) {
+    const unique = [...new Set(ids)];
+    const response = await this.client.request(`/api/members?ids=${unique.join(',')}`);
+    response.items.forEach((member) => { this.memberNames[member.userId] = member.displayName; });
   }
 
   async refreshMember() {
@@ -517,7 +529,7 @@ export class Dashboard {
     records.forEach(([id, request]) => {
       container.append(card([
         pairs([['action', request.path], ['createdAt', date(request.at)]]),
-        element('details', {}, [element('summary', { text: t('requestBody') }), details(request.body)]),
+        element('details', {}, [element('summary', { text: t('requestBody') }), details(request.body, this.memberNames)]),
         element('div', { class: 'or-actions' }, [
           button('retryOriginal', async () => {
             try {
@@ -525,7 +537,7 @@ export class Dashboard {
               const result = await this.mutate(id, request.path, body, {
                 method: request.method,
                 title: 'pendingTitle',
-                preview: [p('pendingHelp'), details(request.body)],
+                preview: () => [p('pendingHelp'), details(request.body, this.memberNames)],
               });
               if (result) {
                 if (await this.refreshMember()) await this.render();
@@ -550,7 +562,12 @@ export class Dashboard {
     if (this.busy) return null;
     this.busy = true;
     try {
-      if (!(await confirmAction(title, preview || p('danger')))) return null;
+      if (body.userId) {
+        await this.loadMemberNames([body.userId]);
+        this.renderPending();
+      }
+      const shownPreview = typeof preview === 'function' ? preview() : preview;
+      if (!(await confirmAction(title, shownPreview || p('danger')))) return null;
       this.client.prepare(id, path, body, method, { keyed });
       this.renderPending();
       this.notice.replaceChildren(p('requestSending'));
@@ -702,7 +719,7 @@ export class Dashboard {
         const rankValue = (item) => item[kind] ?? item.value ?? item.count;
         const rows = (data.items || []).slice(0, 10).map((item) => element('li', { class: 'or-ranking-row' }, [
           element('strong', { text: number(item.rank) }),
-          element('span', { text: item.displayName || item.user?.displayName || item.userId }),
+          element('span', { text: memberDisplayName(item) }),
           element('span', { text: `${number(rankValue(item))} ${kind === 'xp' ? t('xpUnit') : t('day')}` }),
         ]));
         result.replaceChildren(
@@ -771,7 +788,8 @@ export class Dashboard {
               ? undefined : (item.amountMilli ?? item.deltaMilli) / 1000)],
           ['balanceAfter', item.balanceAfterXp ?? item.balanceAfter
             ?? (item.balanceAfterMilli === undefined ? undefined : item.balanceAfterMilli / 1000)],
-          ['userId', item.userId], ['actorId', item.actorId],
+          ['targetMember', item.userId ? memberDisplayName(item) : undefined],
+          ['actorId', item.actorId ? memberDisplayName(item, 'actorId') : undefined],
           ['reason', item.reason || item.error || item.errorCode],
           ['createdAt', item.createdAt ? date(item.createdAt) : undefined],
         ].filter(([, value]) => value !== undefined);
@@ -901,9 +919,11 @@ export class Dashboard {
         if (body.userId && !/^\d{15,20}$/.test(body.userId)) throw new Error(t('invalid'));
         const response = await this.mutate(id, typeof path === 'function' ? path() : path, body, {
           title,
-          preview: [
+          preview: () => [
             p('danger'),
-            pairs(Object.entries(body).map(([key, value]) => [key, t(String(value))])),
+            pairs(Object.entries(memberPresentation(body, this.memberNames)).map(([key, value]) => [
+              key === 'userId' ? 'targetMember' : key, t(String(value)),
+            ])),
           ],
         });
         if (response) {
@@ -1410,7 +1430,7 @@ export class Dashboard {
       const done = Number(job.completed) || 0;
       list.append(card([
         pairs([
-          ['id', job.id], ['userId', job.userId],
+          ['id', job.id], ['targetMember', memberDisplayName(job)],
           ['status', translatedStatus(job.status || job.state)], ['completed', job.completed ?? 0],
           ['failed', job.failed ?? 0], ['queued', job.queued ?? 0], ['attempts', job.attempts ?? 0],
           ['reason', job.error || job.reason || job.errorCode || '—'],
@@ -1438,7 +1458,7 @@ export class Dashboard {
     if (total) panel.append(element('progress', { max: total, value: done, 'aria-label': t('progress') }));
     this.appendMore(panel, data, '/api/jobs', (items) => {
       items.forEach((job) => list.append(card([pairs([
-        ['id', job.id], ['userId', job.userId],
+        ['id', job.id], ['targetMember', memberDisplayName(job)],
         ['status', translatedStatus(job.status || job.state)],
         ['attempts', job.attempts || 0], ['errorCode', job.errorCode || '—'],
       ])])));

@@ -1,3 +1,5 @@
+import { t } from './off-record-locale.js';
+
 export const ROUTES = [
   ['shop', 'shop'], ['ranking', 'ranking'], ['me', 'me'],
   ['admin', 'summary', 'admin.view'], ['admin/attendance', 'attendance', 'attendance.manage'],
@@ -8,6 +10,22 @@ export const ROUTES = [
   ['admin/audit', 'audit', 'audit.view'], ['admin/xp', 'xp', 'xp.adjust'],
   ['admin/access', 'access', 'access.manage'],
 ];
+
+export function memberDisplayName(record, key = 'userId', names = {}) {
+  const nameField = key === 'actorId' ? 'actorDisplayName' : 'displayName';
+  return record[nameField] || (key === 'userId' && record.user?.displayName)
+    || names[record[key]] || t('departedMember');
+}
+
+export function memberPresentation(value, names = {}) {
+  if (Array.isArray(value)) return value.map((item) => memberPresentation(item, names));
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    key,
+    ['userId', 'actorId'].includes(key) && typeof child === 'string'
+      ? memberDisplayName(value, key, names) : memberPresentation(child, names),
+  ]));
+}
 
 export function can(me, permission) {
   if (!me) return false;

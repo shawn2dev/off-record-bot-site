@@ -43,6 +43,9 @@ export const sections = Object.fromEntries(Object.entries({
 export function fixtureResponse(path) {
   const url = new URL(path, 'https://api.offrecord.test');
   if (url.pathname === '/api/me') return member;
+  if (url.pathname === '/api/members') return { items: (url.searchParams.get('ids') || '').split(',').map((userId) => ({
+    userId, displayName: userId === member.user.id ? member.user.displayName : null,
+  })) };
   if (url.pathname === '/api/shop') return { items: products, profile, enabled: true };
   if (url.pathname === '/api/roles') return { items: roles };
   if (url.pathname === '/api/settings') return { sections };
@@ -50,8 +53,8 @@ export function fixtureResponse(path) {
     return { items: [{ userId: member.user.id, displayName: '기록하는 사람', rank: 1, xp: 1000, total: 24, streak: 8 }], own: { rank: 11, xp: 1000, total: 24, streak: 8 } };
   }
   if (url.pathname === '/api/admin/summary') return { members: 120, balanceMilli: 123000000, orders: { pending: 2 }, nickname: { queued: 8 } };
-  if (url.pathname === '/api/jobs') return { items: [{ id: 1, userId: member.user.id, state: 'queued', attempts: 0 }], sweep: { active: true }, counts: { queued: 8 } };
+  if (url.pathname === '/api/jobs') return { items: [{ id: 1, userId: member.user.id, displayName: member.user.displayName, state: 'queued', attempts: 0 }], sweep: { active: true }, counts: { queued: 8 } };
   if (url.pathname === '/api/raffles/preview') return { previewId: 'snapshot-1', candidateCount: 120, winners: 1, amountXp: 100, totalXp: 100, expiresAt: new Date(Date.now() + 300000).toISOString() };
-  if (url.pathname === '/api/orders') return { items: [{ id: 1, product, amountXp: 100, status: 'pending', createdAt: new Date().toISOString() }] };
+  if (url.pathname === '/api/orders') return { items: [{ id: 1, userId: member.user.id, displayName: member.user.displayName, product, amountXp: 100, status: 'pending', createdAt: new Date().toISOString() }] };
   return { items: [] };
 }

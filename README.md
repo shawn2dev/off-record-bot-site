@@ -171,7 +171,7 @@ da.live 콘텐츠를 자동 발행하지 않습니다. 최초 링크 발행 후 
   안전한 `element`, 서버와 같은 `levelForXp`
 - `widgets/off-record/off-record.{html,js,css}`: AEM 위젯 진입점
 
-기본 API 계약은 `/api/me`, `/api/rankings?kind=xp|total|streak`,
+기본 API 계약은 `/api/me`, `/api/members?ids=id1,id2`, `/api/rankings?kind=xp|total|streak`,
 `/api/settings`, `/api/roles`, `/api/shop`, `/api/purchases`, `/api/products`,
 `/api/orders`, `/api/xp/adjust`, `/api/gifts`, `/api/games/:game`,
 `/api/raffles/preview`, `/api/raffles`, `/api/jobs`, `/api/jobs/sync`,
@@ -180,6 +180,13 @@ da.live 콘텐츠를 자동 발행하지 않습니다. 최초 링크 발행 후 
 역할이 50개를 넘으면 `/api/roles`도 `nextCursor`와 `after`를 지원해야 합니다.
 클라이언트는 역할을 최대 10페이지까지 합치고 이름으로 검색합니다.
 개인 신원은 Bearer 토큰으로 결정합니다. 사용자 ID는 선물/XP 조정의 **대상**으로만 보냅니다.
+
+사용자 이름은 서버 내 별명을 우선하며, 별명이 없으면 Discord 표시 이름을 사용합니다.
+랭킹·주문·관리 기록·작업·추첨·선물·XP 조정 결과와 확인 화면은 API의
+`displayName`·`actorDisplayName`으로 표시합니다. 탈퇴한 사용자는 마지막으로 확인한 이름을
+사용하고, 이름을 모르는 과거 기록은 `탈퇴한 사용자`로 표시합니다.
+대상 ID 입력은 유지하되 확인 전에 `/api/members?ids=...`로 이름을 조회합니다.
+상세 JSON과 미확정 요청은 표시용 사본에서만 이름으로 바꾸며 실제 요청 본문·중복 방지 키는 변경하지 않습니다.
 
 설정 응답은 `{sections:{section:{version,value}}}`이며 PUT은
 `{version,patch}`입니다. 상품 생성/수정은 `{product,version,key}`이며 생성 시

@@ -4,9 +4,43 @@ import { apiOrigin } from '../scripts/off-record-config.js';
 import {
   can, routeFor, validateProduct, productState, shortDescription,
   basicOutcomes, gamePreview, validateGame, canonical, requestSize,
-  adminRolesFromPermissions,
+  adminRolesFromPermissions, memberDisplayName, memberPresentation,
 } from '../scripts/off-record-core.js';
 import { Dashboard, levelForXp } from '../scripts/off-record-dashboard.js';
+
+test('member names and nested display-only details never replace IDs in actual request bodies', () => {
+  const id = '123456789012345678';
+  const actor = '234567890123456789';
+  const raw = { userId: id, roleId: actor, reason: id, key: 'unchanged-key', winners: [{ userId: id, displayName: '<b>서버 별명</b>' }] };
+  const snapshot = canonical(raw);
+  const names = { [id]: '서버 별명', [actor]: '서버 운영자' };
+  assert.equal(memberDisplayName(raw, 'userId', names), '서버 별명');
+  assert.equal(memberDisplayName({ actorId: actor }, 'actorId', names), '서버 운영자');
+  assert.equal(memberDisplayName({ userId: 'unknown' }), '탈퇴한 사용자');
+  assert.equal(memberDisplayName({ userId: id, displayName: '새 별명' }, 'userId', names), '새 별명');
+  const displayed = memberPresentation(raw, names);
+  assert.equal(displayed.userId, '서버 별명');
+  assert.equal(displayed.winners[0].userId, '<b>서버 별명</b>');
+  assert.equal(displayed.roleId, actor);
+  assert.equal(displayed.reason, id);
+  assert.equal(displayed.key, 'unchanged-key');
+  assert.equal(canonical(raw), snapshot);
+});
+
+test('member name lookup deduplicates targets without adding names to mutation bodies', async () => {
+  const id = '123456789012345678';
+  const calls = [];
+  const app = {
+    memberNames: {},
+    client: { request: async (path) => {
+      calls.push(path);
+      return { items: [{ userId: id, displayName: '서버 별명' }] };
+    } },
+  };
+  await Dashboard.prototype.loadMemberNames.call(app, [id, id]);
+  assert.deepEqual(calls, [`/api/members?ids=${id}`]);
+  assert.deepEqual(app.memberNames, { [id]: '서버 별명' });
+});
 
 test('nickname settings start settings, roles and job requests concurrently', async () => {
   const started = [];

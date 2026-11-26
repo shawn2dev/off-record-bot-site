@@ -86,6 +86,8 @@ const ko = {
   id: '식별자',
   kind: '유형',
   userId: '대상 Discord 사용자 ID',
+  targetMember: '대상 사용자',
+  departedMember: '탈퇴한 사용자',
   purchaseHistory: '구매 내역',
   ledger: '내 경험치 원장',
   profile: '내 프로필',
