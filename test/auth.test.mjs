@@ -224,15 +224,101 @@ test('exchanging a code without a successful protected identity check does not r
   assert.equal(failed.navigations.length, 0);
 });
 
-test('an automatic restore in progress shows a restoring state rather than a login button', async () => {
-  const calls = [];
-  await Dashboard.prototype.initialize.call({
-    client: { initialize: async () => ({ redirecting: true }), token: '' },
-    shell: () => {},
-    restoring: () => calls.push('restoring'),
+test('automatic restoration keeps the whole dashboard hidden before and during navigation', async () => {
+  let complete;
+  const root = { hidden: false };
+  const app = {
+    root,
+    client: { initialize: () => new Promise((resolve) => { complete = resolve; }), token: '' },
+    shell: () => assert.equal(root.hidden, true),
     login: () => { throw new Error('Login must not render during automatic restoration.'); },
-  });
-  assert.deepEqual(calls, ['restoring']);
+  };
+  const initializing = Dashboard.prototype.initialize.call(app);
+  assert.equal(root.hidden, true);
+  complete({ redirecting: true });
+  await initializing;
+  assert.equal(root.hidden, true);
+  assert.equal(app.authNavigating, true);
+});
+
+test('initialization reveals login, expiry, configuration and error screens instead of leaving them blank', async () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { addEventListener: () => {} };
+  try {
+    for (const scenario of [
+      { result: { redirecting: false }, expected: [['login', undefined]] },
+      { result: { error: 'sessionExpired' }, expected: [['login', 'sessionExpired']] },
+      { result: { setup: true }, expected: [['setup']] },
+      { failure: new Error('storage unavailable'), expected: [['login', undefined], ['error', 'storage unavailable']] },
+    ]) {
+      const root = { hidden: false };
+      const calls = [];
+      await Dashboard.prototype.initialize.call({
+        root,
+        client: {
+          initialize: async () => {
+            assert.equal(root.hidden, true);
+            if (scenario.failure) throw scenario.failure;
+            return scenario.result;
+          },
+          token: '',
+        },
+        shell: () => {},
+        setup: () => calls.push(['setup']),
+        login: (error) => calls.push(['login', error]),
+        error: (error) => calls.push(['error', error.message]),
+      });
+      assert.equal(root.hidden, false);
+      assert.deepEqual(calls, scenario.expected);
+    }
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+test('restored member data and the initial view stay hidden until ready, then receive focus', async () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { addEventListener: () => {} };
+  try {
+    const root = { hidden: false };
+    let finishRender;
+    let rendering;
+    const renderStarted = new Promise((resolve) => { rendering = resolve; });
+    let focused = false;
+    const app = {
+      root,
+      client: { initialize: async () => ({}), token: 'fixture-token' },
+      shell: () => {},
+      loadMember: async () => {
+        assert.equal(root.hidden, true);
+        app.me = { user: { id: '123456789012345678' } };
+      },
+      render: () => {
+        assert.equal(root.hidden, true);
+        rendering();
+        return new Promise((resolve) => { finishRender = resolve; });
+      },
+      content: {
+        focus: (options) => {
+          assert.equal(root.hidden, false);
+          assert.deepEqual(options, { preventScroll: true });
+          focused = true;
+        },
+      },
+    };
+    const initializing = Dashboard.prototype.initialize.call(app);
+    await renderStarted;
+    assert.equal(root.hidden, true);
+    assert.equal(focused, false);
+    finishRender();
+    await initializing;
+    assert.equal(root.hidden, false);
+    assert.equal(focused, true);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
 });
 
 test('a pending logout cannot have its automatic-restore suppression cleared by a late identity response', async () => {

@@ -309,11 +309,12 @@ export class Dashboard {
   }
 
   async initialize() {
+    this.root.hidden = true;
     this.shell();
     try {
       const result = await this.client.initialize();
       if (result.redirecting) {
-        this.restoring();
+        this.authNavigating = true;
         return;
       }
       if (result.hash && routeFor(result.hash)) {
@@ -328,6 +329,8 @@ export class Dashboard {
       this.login();
       this.error(error);
     }
+    this.root.hidden = false;
+    if (this.me) this.content.focus({ preventScroll: true });
     window.addEventListener('hashchange', async () => {
       const next = window.location.hash;
       if (this.dirty && !(await confirmAction('dirty', p('leaveConfirm')))) {
@@ -416,12 +419,6 @@ export class Dashboard {
 
   setup(invalid = false) {
     this.content.replaceChildren(card([heading('setupTitle', 1), p(invalid ? 'configInvalid' : 'setupHelp')], 'or-state'));
-  }
-
-  restoring() {
-    this.authNavigating = true;
-    this.content.setAttribute('aria-busy', 'true');
-    this.content.replaceChildren(card([p('restoringSession')], 'or-state'));
   }
 
   login(errorKey) {

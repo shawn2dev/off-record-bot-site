@@ -34,7 +34,6 @@ const ko = {
   configInvalid: 'API 주소가 올바르지 않아요. HTTPS Origin만 입력하고 경로·쿼리·인증 정보는 제거해 주세요.',
   storageFailed: '작성 내용을 안전하게 보관할 수 없어 로그인 이동을 중단했어요. 브라우저의 세션 저장소 설정을 확인해 주세요.',
   loading: '기록을 불러오고 있어요…',
-  restoringSession: '로그인 세션을 복원하고 있어요…',
   empty: '아직 표시할 기록이 없어요.',
   error: '요청을 완료하지 못했어요. 연결 상태와 서버를 확인해 주세요.',
   retry: '다시 시도',
