@@ -31,7 +31,7 @@ export const sections = Object.fromEntries(Object.entries({
   access: { adminRoles: { [roles[0].id]: ['attendance.manage'] } },
   gift: { enabled: true, feePercent: 15 },
   shop: { enabled: true },
-  nickname: { enabled: true, template: '[lv.{레벨}]', excludedRoleIds: [] },
+  nickname: { enabled: false, template: '[lv.{레벨}]', excludedRoleIds: [] },
   raffle: { maxWinners: 50, maxAmountXp: 10000, maxTotalXp: 100000, previewTtlSeconds: 300 },
   games: Object.fromEntries(['slots', 'wheel', 'oddEven', 'dice'].map((kind) => [kind, {
     enabled: true, mode: 'basic', targetRtp: 94, minBetXp: 1, maxBetXp: 1000,
