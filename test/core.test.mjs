@@ -5,7 +5,52 @@ import {
   can, routeFor, validateProduct, productState, shortDescription,
   basicOutcomes, gamePreview, validateGame, canonical, requestSize,
 } from '../scripts/off-record-core.js';
-import { levelForXp } from '../scripts/off-record-dashboard.js';
+import { Dashboard, levelForXp } from '../scripts/off-record-dashboard.js';
+
+test('nickname settings start settings, roles and job requests concurrently', async () => {
+  const started = [];
+  let rejectSettings;
+  const app = {
+    me: { owner: true },
+    client: {
+      request: () => {
+        started.push('settings');
+        return new Promise((resolve, reject) => { rejectSettings = reject; });
+      },
+    },
+    getRoles: () => {
+      started.push('roles');
+      return new Promise(() => {});
+    },
+    jobPanel: () => {
+      started.push('jobs');
+      return new Promise(() => {});
+    },
+  };
+  const loading = Dashboard.prototype.settingsPage.call(app, 'nickname');
+  assert.deepEqual(started, ['settings', 'roles', 'jobs']);
+  const failure = new Error('expected metadata failure');
+  rejectSettings(failure);
+  await assert.rejects(loading, failure);
+});
+
+test('simple settings do not start unrelated roles or job requests', async () => {
+  const started = [];
+  const failure = new Error('expected metadata failure');
+  const loading = Dashboard.prototype.settingsPage.call({
+    me: { owner: true },
+    client: {
+      request: () => {
+        started.push('settings');
+        return Promise.reject(failure);
+      },
+    },
+    getRoles: () => { started.push('roles'); },
+    jobPanel: () => { started.push('jobs'); },
+  }, 'attendance');
+  assert.deepEqual(started, ['settings']);
+  await assert.rejects(loading, failure);
+});
 
 test('configuration uses the production gateway, supports explicit disabling and rejects unsafe origins', () => {
   assert.equal(apiOrigin(), 'https://off-record-xp-api.cbycdy2.workers.dev');

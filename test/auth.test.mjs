@@ -29,6 +29,121 @@ function harness(overrides = {}) {
   return { client, memory, storage, requests, navigations };
 }
 
+test('identical in-flight reads share one fetch but completed reads are never cached', async () => {
+  let resolve;
+  let calls = 0;
+  const { client } = harness({
+    fetcher: () => {
+      calls += 1;
+      return new Promise((done) => { resolve = done; });
+    },
+  });
+  client.token = 'fixture-token';
+  client.expiresAt = Date.now() + 60000;
+  const first = client.request('/api/ledger');
+  const second = client.request('/api/ledger');
+  assert.equal(calls, 1);
+  resolve(Response.json({ items: [{ id: 1 }] }));
+  const [a, b] = await Promise.all([first, second]);
+  a.items[0].id = 2;
+  assert.equal(b.items[0].id, 1);
+  const next = client.request('/api/ledger');
+  assert.equal(calls, 2);
+  resolve(Response.json({ items: [{ id: 3 }] }));
+  assert.equal((await next).items[0].id, 3);
+});
+
+test('failed shared reads are removed so an explicit retry makes a new request', async () => {
+  let rejectNetwork;
+  let calls = 0;
+  const { client } = harness({
+    fetcher: () => {
+      calls += 1;
+      if (calls === 1) return new Promise((resolve, reject) => { rejectNetwork = reject; });
+      return Promise.resolve(Response.json({ items: [] }));
+    },
+  });
+  client.token = 'fixture-token';
+  client.expiresAt = Date.now() + 60000;
+  const first = client.request('/api/ledger');
+  const second = client.request('/api/ledger');
+  const results = Promise.allSettled([first, second]);
+  rejectNetwork(new Error('offline'));
+  assert.deepEqual((await results).map((result) => result.status), ['rejected', 'rejected']);
+  assert.equal(client.inFlightReads.size, 0);
+  assert.deepEqual(await client.request('/api/ledger'), { items: [] });
+  assert.equal(calls, 2);
+});
+
+test('an expired caller cannot join a pending read and logout clears pending read entries', async () => {
+  const responses = [];
+  const { client } = harness({
+    fetcher: () => new Promise((resolve) => responses.push(resolve)),
+  });
+  client.token = 'fixture-token';
+  client.expiresAt = Date.now() + 60000;
+  const old = client.request('/api/ledger');
+  client.expiresAt = 0;
+  await assert.rejects(client.request('/api/ledger'), { status: 401 });
+  assert.equal(responses.length, 1);
+  assert.equal(client.inFlightReads.size, 0);
+  responses[0](Response.json({ items: [] }));
+  await assert.rejects(old, { status: 401 });
+  client.token = 'next-fixture-token';
+  client.expiresAt = Date.now() + 60000;
+  const pending = client.request('/api/ledger');
+  const logout = client.logout();
+  responses[2](Response.json({ ok: true }));
+  await logout;
+  assert.equal(client.inFlightReads.size, 0);
+  responses[1](Response.json({ items: [] }));
+  await assert.rejects(pending, { status: 401 });
+});
+
+test('reads from a previous token cannot clear a new token or return previous-account data', async () => {
+  const responses = [];
+  const { client } = harness({
+    fetcher: () => new Promise((resolve) => responses.push(resolve)),
+  });
+  client.token = 'old-fixture-token';
+  client.expiresAt = Date.now() + 60000;
+  const old = client.request('/api/me');
+  client.token = 'new-fixture-token';
+  const current = client.request('/api/me');
+  assert.equal(responses.length, 2);
+  responses[0](Response.json({ error: { code: 'AUTH_EXPIRED' } }, { status: 401 }));
+  await assert.rejects(old, { status: 401 });
+  assert.equal(client.token, 'new-fixture-token');
+  responses[1](Response.json({ user: { id: 'new-user' } }));
+  assert.equal((await current).user.id, 'new-user');
+  const pending = client.request('/api/ledger');
+  client.token = '';
+  responses[2](Response.json({ items: [{ id: 'old-account-record' }] }));
+  await assert.rejects(pending, { status: 401 });
+});
+
+test('mutations do not share requests and invalidate older in-flight read entries', async () => {
+  const responses = [];
+  const { client } = harness({
+    fetcher: () => new Promise((resolve) => responses.push(resolve)),
+  });
+  client.token = 'fixture-token';
+  client.expiresAt = Date.now() + 60000;
+  const old = client.request('/api/ledger');
+  const firstWrite = client.request('/api/gifts', { method: 'POST', body: { amount: 1 } });
+  const secondWrite = client.request('/api/gifts', { method: 'POST', body: { amount: 1 } });
+  assert.equal(responses.length, 3);
+  responses[1](Response.json({ ok: true }));
+  responses[2](Response.json({ ok: true }));
+  await Promise.all([firstWrite, secondWrite]);
+  const current = client.request('/api/ledger');
+  assert.equal(responses.length, 4);
+  responses[0](Response.json({ items: [{ id: 1 }] }));
+  responses[3](Response.json({ items: [{ id: 2 }] }));
+  assert.equal((await old).items[0].id, 1);
+  assert.equal((await current).items[0].id, 2);
+});
+
 test('versioned settings and nickname sync preserve exact unkeyed request shapes', async () => {
   const { client, requests } = harness();
   client.token = 'fixture-token';

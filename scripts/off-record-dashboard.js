@@ -198,7 +198,7 @@ async function confirmAction(title, content, actionLabel = 'confirm') {
   });
 }
 
-class Dashboard {
+export class Dashboard {
   constructor(root, client) {
     this.root = root;
     this.client = client;
@@ -836,12 +836,15 @@ class Dashboard {
   }
 
   async settingsPage(section) {
-    const response = section === 'raffle' && !can(this.me, 'raffle.manage')
-      ? { sections: {} } : await this.client.request('/api/settings');
+    const needsRoles = ['access', 'nickname', 'games', 'raffle'].includes(section);
+    const [response, roles, jobs] = await Promise.all([
+      section === 'raffle' && !can(this.me, 'raffle.manage')
+        ? { sections: {} } : this.client.request('/api/settings'),
+      needsRoles ? this.getRoles() : [],
+      section === 'nickname' ? this.jobPanel() : null,
+    ]);
     const record = response.sections?.[section];
     if (!record && !(section === 'raffle' && can(this.me, 'raffle.execute'))) return card([p('forbidden')]);
-    const needsRoles = ['access', 'nickname', 'games', 'raffle'].includes(section);
-    const roles = needsRoles ? await this.getRoles() : [];
     const view = element('div');
     if (record && (section !== 'raffle' || can(this.me, 'raffle.manage'))) {
       const builders = {
@@ -852,7 +855,7 @@ class Dashboard {
         this.simpleFields(section, value, roles)
       ))));
     }
-    if (section === 'nickname') view.append(await this.jobPanel());
+    if (jobs) view.append(jobs);
     if (section === 'raffle' && can(this.me, 'raffle.execute')) {
       view.append(this.raffleForm(roles, record?.value));
     }

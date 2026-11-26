@@ -48,6 +48,7 @@ export class OffRecordClient {
     this.location = location || window.location;
     this.token = '';
     this.expiresAt = 0;
+    this.inFlightReads = new Map();
     this.state = { drafts: {}, requests: {} };
     try {
       const saved = JSON.parse(this.storage.getItem(STORAGE_KEY) || '{}');
@@ -159,6 +160,7 @@ export class OffRecordClient {
         if (typeof response.accessToken !== 'string' || !Number.isFinite(response.expiresIn)
           || response.expiresIn <= 0) throw new ApiError('loginFailed');
         this.token = response.accessToken;
+        this.inFlightReads.clear();
         this.expiresAt = Date.now() + response.expiresIn * 1000;
         return { hash: this.state.returnHash };
       } catch {
@@ -176,11 +178,34 @@ export class OffRecordClient {
     if (body && requestSize(body) > 32768) throw new ApiError('tooLarge', '', 413);
     if (!anonymous && (!this.token || Date.now() >= this.expiresAt)) {
       this.token = '';
+      this.inFlightReads.clear();
       throw new ApiError('sessionExpired', '', 401);
     }
+    const { token } = this;
+    const share = method === 'GET' && body === undefined && !anonymous;
+    const existing = this.inFlightReads.get(path);
+    if (share && existing?.token === token) {
+      return JSON.parse(JSON.stringify(await existing.promise));
+    }
+    const promise = this.performRequest(path, {
+      method, body, anonymous, token,
+    });
+    if (!share) return promise;
+    const entry = { token, promise };
+    this.inFlightReads.set(path, entry);
+    try {
+      return JSON.parse(JSON.stringify(await promise));
+    } finally {
+      if (this.inFlightReads.get(path) === entry) this.inFlightReads.delete(path);
+    }
+  }
+
+  async performRequest(path, {
+    method, body, anonymous, token,
+  }) {
     const headers = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (!anonymous) headers.Authorization = `Bearer ${this.token}`;
+    if (!anonymous) headers.Authorization = `Bearer ${token}`;
     let response;
     let data;
     const controller = new AbortController();
@@ -203,9 +228,14 @@ export class OffRecordClient {
       throw new ApiError('error');
     } finally { clearTimeout(timeout); }
     if (!response.ok) {
-      if (response.status === 401) this.token = '';
+      if (response.status === 401 && this.token === token) {
+        this.token = '';
+        this.inFlightReads.clear();
+      }
       throw new ApiError(data.error?.code || 'error', data.error?.message, response.status, response.headers.get('Retry-After'));
     }
+    if (!anonymous && this.token !== token) throw new ApiError('sessionExpired', '', 401);
+    if (!anonymous && method !== 'GET') this.inFlightReads.clear();
     return data;
   }
 
@@ -257,6 +287,7 @@ export class OffRecordClient {
     } finally {
       this.token = '';
       this.expiresAt = 0;
+      this.inFlightReads.clear();
     }
   }
 }
