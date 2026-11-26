@@ -81,6 +81,15 @@ export class OffRecordClient {
     this.persist();
   }
 
+  confirmSession() {
+    if (!this.token || Date.now() >= this.expiresAt) {
+      throw new ApiError('sessionExpired', '', 401);
+    }
+    if (this.state.suppressRestore || !this.state.lastRestore) return;
+    this.state.lastRestore = 0;
+    this.persist();
+  }
+
   bindActor(userId) {
     if (this.state.actorId === userId) return false;
     this.state.accounts ||= {};

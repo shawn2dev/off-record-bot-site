@@ -6,6 +6,7 @@ import { runInNewContext } from 'node:vm';
 import {
   OffRecordClient, makeProof, captureAuthCallback,
 } from '../scripts/off-record-auth.js';
+import { Dashboard } from '../scripts/off-record-dashboard.js';
 
 function harness(overrides = {}) {
   const memory = new Map();
@@ -179,6 +180,77 @@ test('top-level restore has an exact queryless/hashless return URL and is bounde
   assert.equal(url.searchParams.get('attempt'), client.state.auth.attempt);
   assert.equal(await client.startLogin(true), false);
   assert.equal(navigations.length, 1);
+});
+
+test('completed session restoration permits an immediate page reload without a login click', async () => {
+  const h = harness({
+    fetcher: async (url) => Response.json(new URL(url).pathname === '/auth/exchange'
+      ? { accessToken: 'restored-memory-token', expiresIn: 300 }
+      : { user: { id: '123456789012345678' } }),
+  });
+  await h.client.startLogin(true);
+  captureAuthCallback({ href: 'https://site.example.test/dashboard?offrecord_code=restore-code' }, {
+    state: null, replaceState: () => {},
+  });
+  await h.client.initialize();
+  await Dashboard.prototype.loadMember.call({ client: h.client, navigation: () => {} });
+  const reloaded = harness({ storage: h.storage });
+  assert.deepEqual(await reloaded.client.initialize(), { redirecting: true });
+  assert.equal(reloaded.navigations.length, 1);
+  assert.equal(new URL(reloaded.navigations[0]).searchParams.get('restore'), '1');
+  assert.equal([...h.memory.values()].join('').includes('restored-memory-token'), false);
+});
+
+test('exchanging a code without a successful protected identity check does not reset the restore guard', async () => {
+  const h = harness({
+    fetcher: async (url) => new URL(url).pathname === '/auth/exchange'
+      ? Response.json({ accessToken: 'unconfirmed-token', expiresIn: 300 })
+      : Response.json({ error: { code: 'AUTH_EXPIRED' } }, { status: 401 }),
+  });
+  await h.client.startLogin(true);
+  captureAuthCallback({ href: 'https://site.example.test/dashboard?offrecord_code=unconfirmed-code' }, {
+    state: null, replaceState: () => {},
+  });
+  await h.client.initialize();
+  const pending = harness({ storage: h.storage });
+  assert.deepEqual(await pending.client.initialize(), { redirecting: false });
+  assert.equal(pending.navigations.length, 0);
+  await assert.rejects(
+    Dashboard.prototype.loadMember.call({ client: h.client, navigation: () => {} }),
+    { status: 401 },
+  );
+  const failed = harness({ storage: h.storage });
+  assert.deepEqual(await failed.client.initialize(), { redirecting: false });
+  assert.equal(failed.navigations.length, 0);
+});
+
+test('an automatic restore in progress shows a restoring state rather than a login button', async () => {
+  const calls = [];
+  await Dashboard.prototype.initialize.call({
+    client: { initialize: async () => ({ redirecting: true }), token: '' },
+    shell: () => {},
+    restoring: () => calls.push('restoring'),
+    login: () => { throw new Error('Login must not render during automatic restoration.'); },
+  });
+  assert.deepEqual(calls, ['restoring']);
+});
+
+test('a pending logout cannot have its automatic-restore suppression cleared by a late identity response', async () => {
+  let rejectLogout;
+  const h = harness({
+    fetcher: () => new Promise((resolve, reject) => { rejectLogout = reject; }),
+  });
+  h.client.token = 'logout-memory-token';
+  h.client.expiresAt = Date.now() + 300000;
+  h.client.state.lastRestore = Date.now();
+  const logout = h.client.logout();
+  h.client.confirmSession();
+  assert.equal(h.client.state.suppressRestore, true);
+  rejectLogout(new Error('offline'));
+  await assert.rejects(logout);
+  const reloaded = harness({ storage: h.storage });
+  assert.deepEqual(await reloaded.client.initialize(), { redirecting: false });
+  assert.equal(reloaded.navigations.length, 0);
 });
 
 test('callback code is removed before exchange and access token stays in memory only', async () => {

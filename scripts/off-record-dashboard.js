@@ -312,6 +312,10 @@ export class Dashboard {
     this.shell();
     try {
       const result = await this.client.initialize();
+      if (result.redirecting) {
+        this.restoring();
+        return;
+      }
       if (result.hash && routeFor(result.hash)) {
         window.history.replaceState(null, '', `${window.location.pathname}#/${routeFor(result.hash)[0]}`);
       }
@@ -414,6 +418,12 @@ export class Dashboard {
     this.content.replaceChildren(card([heading('setupTitle', 1), p(invalid ? 'configInvalid' : 'setupHelp')], 'or-state'));
   }
 
+  restoring() {
+    this.authNavigating = true;
+    this.content.setAttribute('aria-busy', 'true');
+    this.content.replaceChildren(card([p('restoringSession')], 'or-state'));
+  }
+
   login(errorKey) {
     this.me = null;
     this.dirtyForms.clear();
@@ -447,6 +457,7 @@ export class Dashboard {
   async loadMember() {
     this.me = await this.client.request('/api/me');
     this.client.bindActor(this.me.user.id);
+    this.client.confirmSession();
     this.navigation();
   }
 
